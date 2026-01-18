@@ -1,94 +1,103 @@
-﻿using Carpooling.Application.Interfaces;
+﻿using Carpooling.Application.Common.Pagination;
+using Carpooling.Application.Common.Querying;
+using Carpooling.Application.Interfaces;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Carpooling.API.Controllers;
 
+[ApiVersion("1.0")]
 [Authorize(Roles = "Admin")]
 [ApiController]
-[Route("api/admin")]
+[Route("api/v{version:apiVersion}/admin")]
 public class AdminController : ControllerBase
 {
-    private readonly IAppDbContext _db;
+    private readonly IAdminService _adminService;
+    private readonly ILogger<AdminController> _logger;
 
-    public AdminController(IAppDbContext db)
+    public AdminController(
+        IAdminService adminService,
+        ILogger<AdminController> logger)
     {
-        _db = db;
+        _adminService = adminService;
+        _logger = logger;
     }
 
     // =====================================================
-    // DASHBOARD STATS
-    // GET: api/admin/stats
+    // GET USERS (ADMIN)
     // =====================================================
-    [HttpGet("stats")]
-    public IActionResult GetStats()
-    {
-        return Ok(new
-        {
-            Users = _db.Users.Count(),
-            Rides = _db.Rides.Count(),
-            Bookings = _db.Bookings.Count()
-        });
-    }
-
-    // =====================================================
-    // GET ALL USERS
-    // GET: api/admin/users
+    // GET: api/v1/admin/users
     // =====================================================
     [HttpGet("users")]
-    public IActionResult GetUsers()
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public IActionResult Users(
+        [FromQuery] PagedRequest page,
+        [FromQuery] SortRequest sort,
+        [FromQuery] FilterRequest filter,
+        CancellationToken cancellationToken)
     {
-        return Ok(_db.Users.ToList());
+        if (page.PageSize <= 0)
+            return BadRequest("PageSize must be greater than zero");
+
+        _logger.LogInformation(
+            "Admin requested users list | Page={Page} Size={Size}",
+            page.Page,
+            page.PageSize
+        );
+
+        var result = _adminService.GetUsers(page, sort, filter);
+
+        return Ok(result);
     }
 
     // =====================================================
-    // BLOCK / UNBLOCK USER
-    // PUT: api/admin/users/{id}/block
+    // GET BOOKINGS (ADMIN)
     // =====================================================
-    [HttpPut("users/{id:guid}/block")]
-    public IActionResult BlockUser(Guid id)
+    // GET: api/v1/admin/bookings
+    // =====================================================
+    [HttpGet("bookings")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public IActionResult Bookings(
+        [FromQuery] PagedRequest page,
+        [FromQuery] SortRequest sort,
+        CancellationToken cancellationToken)
     {
-        var user = _db.Users.FirstOrDefault(x => x.Id == id);
-        if (user == null)
-            return NotFound("User not found");
+        if (page.PageSize <= 0)
+            return BadRequest("PageSize must be greater than zero");
 
-        user.IsBlocked = true;
-        _db.SaveChanges();
+        _logger.LogInformation(
+            "Admin requested bookings list | Page={Page} Size={Size}",
+            page.Page,
+            page.PageSize
+        );
 
-        return Ok("User blocked");
+        var result = _adminService.GetBookings(page, sort);
+
+        return Ok(result);
     }
 
     // =====================================================
-    // UNBLOCK USER
-    // PUT: api/admin/users/{id}/unblock
+    // GET AUDIT LOGS (ADMIN)
     // =====================================================
-    [HttpPut("users/{id:guid}/unblock")]
-    public IActionResult UnblockUser(Guid id)
+    // GET: api/v1/admin/audit-logs
+    // =====================================================
+    [HttpGet("audit-logs")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public IActionResult AuditLogs(
+        [FromQuery] PagedRequest request,
+        CancellationToken cancellationToken)
     {
-        var user = _db.Users.FirstOrDefault(x => x.Id == id);
-        if (user == null)
-            return NotFound("User not found");
+        if (request.PageSize <= 0)
+            return BadRequest("PageSize must be greater than zero");
 
-        user.IsBlocked = false;
-        _db.SaveChanges();
+        _logger.LogInformation(
+            "Admin requested audit logs | Page={Page} Size={Size}",
+            request.Page,
+            request.PageSize
+        );
 
-        return Ok("User unblocked");
-    }
+        var result = _adminService.GetAuditLogs(request);
 
-    // =====================================================
-    // DELETE ANY RIDE
-    // DELETE: api/admin/rides/{id}
-    // =====================================================
-    [HttpDelete("rides/{id:guid}")]
-    public IActionResult DeleteRide(Guid id)
-    {
-        var ride = _db.Rides.FirstOrDefault(r => r.Id == id);
-        if (ride == null)
-            return NotFound("Ride not found");
-
-        _db.Remove(ride);
-        _db.SaveChanges();
-
-        return Ok("Ride deleted by admin");
+        return Ok(result);
     }
 }

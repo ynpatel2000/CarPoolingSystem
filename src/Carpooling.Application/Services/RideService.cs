@@ -1,81 +1,24 @@
-﻿using Carpooling.Application.DTOs.Ride;
+﻿using Carpooling.Application.Common.Pagination;
+using Carpooling.Application.Common.Querying;
+using Carpooling.Application.DTOs.Ride;
 using Carpooling.Application.Exceptions;
 using Carpooling.Application.Interfaces;
 using Carpooling.Domain.Entities;
+using Microsoft.Extensions.Logging;
 
 namespace Carpooling.Application.Services;
 
 public class RideService : IRideService
 {
     private readonly IAppDbContext _db;
+    private readonly ILogger<RideService> _logger;
 
-    public RideService(IAppDbContext db)
+    public RideService(IAppDbContext db, ILogger<RideService> logger)
     {
         _db = db;
+        _logger = logger;
     }
 
-    // =====================================================
-    // GET ALL RIDES (ADMIN USE)
-    // =====================================================
-    public List<Ride> GetAll()
-    {
-        return _db.Rides
-            .Where(r => !r.IsDeleted)
-            .OrderByDescending(r => r.CreatedAt)
-            .ToList();
-    }
-
-    // =====================================================
-    // GET RIDE BY ID (DETAIL VIEW)
-    // =====================================================
-    public Ride GetById(Guid rideId)
-    {
-        var ride = _db.Rides.FirstOrDefault(r => r.Id == rideId && !r.IsDeleted);
-
-        if (ride == null)
-            throw new AppException("Ride not found", 404);
-
-        return ride;
-    }
-
-    // =====================================================
-    // SEARCH RIDES (PASSENGER)
-    // =====================================================
-    public List<Ride> Search(RideSearchDto dto)
-    {
-        if (string.IsNullOrWhiteSpace(dto.FromCity))
-            throw new AppException("FromCity is required");
-
-        if (string.IsNullOrWhiteSpace(dto.ToCity))
-            throw new AppException("ToCity is required");
-
-        if (dto.RequiredSeats <= 0)
-            throw new AppException("Required seats must be greater than zero");
-
-        return _db.Rides
-            .Where(r =>
-                r.FromCity == dto.FromCity &&
-                r.ToCity == dto.ToCity &&
-                r.RideDate.Date == dto.RideDate.Date &&
-                r.AvailableSeats >= dto.RequiredSeats)
-            .OrderBy(r => r.RideDate)
-            .ToList();
-    }
-
-    // =====================================================
-    // GET MY RIDES (USER AS DRIVER)
-    // =====================================================
-    public List<Ride> GetMyRides(Guid driverId)
-    {
-        return _db.Rides
-            .Where(r => r.DriverId == driverId)
-            .OrderByDescending(r => r.RideDate)
-            .ToList();
-    }
-
-    // =====================================================
-    // CREATE RIDE (USER ACTS AS DRIVER)
-    // =====================================================
     public void CreateRide(Guid driverId, CreateRideDto dto)
     {
         if (dto.AvailableSeats <= 0)
@@ -97,49 +40,71 @@ public class RideService : IRideService
 
         _db.Add(ride);
         _db.SaveChanges();
+
+        _logger.LogInformation("Ride {RideId} created by {DriverId}", ride.Id, driverId);
     }
 
-    // =====================================================
-    // UPDATE RIDE (ONLY DRIVER CAN UPDATE)
-    // =====================================================
+    public Ride GetById(Guid rideId)
+    {
+        return _db.Rides.FirstOrDefault(r => r.Id == rideId && !r.IsDeleted)
+               ?? throw new AppException("Ride not found", 404);
+    }
+
+    public PagedResult<Ride> GetMyRides(
+        Guid driverId,
+        PagedRequest page,
+        SortRequest sort)
+    {
+        return _db.Rides
+            .Where(r => r.DriverId == driverId && !r.IsDeleted)
+            .ApplySorting(sort, r => r.CreatedAt)
+            .ToPagedResult(page);
+    }
+
+    public PagedResult<Ride> Search(
+        RideSearchDto dto,
+        PagedRequest page,
+        SortRequest sort)
+    {
+        return _db.Rides
+            .Where(r =>
+                !r.IsDeleted &&
+                r.FromCity == dto.FromCity &&
+                r.ToCity == dto.ToCity &&
+                r.RideDate.Date == dto.RideDate.Date &&
+                r.AvailableSeats >= dto.RequiredSeats)
+            .ApplySorting(sort, r => r.RideDate)
+            .ToPagedResult(page);
+    }
+
     public void UpdateRide(Guid rideId, Guid driverId, UpdateRideDto dto)
     {
-        var ride = _db.Rides.FirstOrDefault(r => r.Id == rideId);
-
-        if (ride == null)
-            throw new AppException("Ride not found", 404);
+        var ride = GetById(rideId);
 
         if (ride.DriverId != driverId)
-            throw new AppException("You are not allowed to update this ride", 403);
-
-        if (dto.AvailableSeats <= 0)
-            throw new AppException("Seats must be greater than zero");
+            throw new AppException("Forbidden", 403);
 
         ride.FromCity = dto.FromCity.Trim();
         ride.ToCity = dto.ToCity.Trim();
         ride.RideDate = dto.RideDate;
         ride.AvailableSeats = dto.AvailableSeats;
         ride.PricePerSeat = dto.PricePerSeat;
+        ride.UpdatedAt = DateTime.UtcNow;
 
+        _db.Update(ride);
         _db.SaveChanges();
     }
 
-    // =====================================================
-    // DELETE RIDE
-    // DRIVER: delete own ride
-    // ADMIN: delete any ride
-    // =====================================================
     public void DeleteRide(Guid rideId, Guid userId, bool isAdmin)
     {
-        var ride = _db.Rides.FirstOrDefault(r => r.Id == rideId);
-
-        if (ride == null)
-            throw new AppException("Ride not found", 404);
+        var ride = GetById(rideId);
 
         if (!isAdmin && ride.DriverId != userId)
-            throw new AppException("You are not allowed to delete this ride", 403);
+            throw new AppException("Forbidden", 403);
 
         ride.IsDeleted = true;
+        ride.UpdatedAt = DateTime.UtcNow;
+
         _db.Update(ride);
         _db.SaveChanges();
     }

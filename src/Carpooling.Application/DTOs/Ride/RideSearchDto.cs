@@ -1,9 +1,12 @@
 ﻿namespace Carpooling.Application.DTOs.Ride;
 
-public record RideSearchDto
+public class RideSearchDto
 {
-    public string FromCity { get; init; } = string.Empty;
-    public string ToCity { get; init; } = string.Empty;
-    public DateTime RideDate { get; init; }
-    public int RequiredSeats { get; init; } = 1;
+    public string FromCity { get; set; } = string.Empty;
+
+    public string ToCity { get; set; } = string.Empty;
+
+    public DateTime RideDate { get; set; }
+
+    public int RequiredSeats { get; set; } = 1;
 }

@@ -1,11 +1,25 @@
 ﻿namespace Carpooling.Worker.Services;
 
-public class EmailSettings
+public sealed class EmailSettings
 {
-    public string SmtpServer { get; set; } = default!;
-    public int Port { get; set; }
-    public string SenderName { get; set; } = default!;
-    public string SenderEmail { get; set; } = default!;
-    public string Username { get; set; } = default!;
-    public string Password { get; set; } = default!;
+    // Configuration section name
+    public const string SectionName = "EmailSettings";
+
+    // SMTP
+    public string Host { get; init; } = string.Empty;
+    public int Port { get; init; } = 587;
+
+    // Security
+    public bool UseSsl { get; init; } = true;
+
+    // Sender
+    public string FromName { get; init; } = string.Empty;
+    public string FromEmail { get; init; } = string.Empty;
+
+    // Credentials
+    public string Username { get; init; } = string.Empty;
+    public string Password { get; init; } = string.Empty;
+
+    // Optional
+    public int TimeoutSeconds { get; init; } = 30;
 }

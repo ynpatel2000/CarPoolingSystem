@@ -4,9 +4,9 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace Carpooling.Application.Interfaces
+namespace Carpooling.Infrastructure.Messaging.Interfaces
 {
-    internal interface INotificationService
+    internal class IBookingEventPublisher
     {
     }
 }

@@ -1,4 +1,5 @@
 ﻿using Carpooling.API.Extensions;
+using Carpooling.Application.Common.Pagination;
 using Carpooling.Application.DTOs.Booking;
 using Carpooling.Application.Interfaces;
 using Microsoft.AspNetCore.Authorization;
@@ -6,53 +7,105 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace Carpooling.API.Controllers;
 
+[ApiVersion("1.0")]
 [Authorize(Roles = "User")]
 [ApiController]
-[Route("api/bookings")]
+[Route("api/v{version:apiVersion}/bookings")]
 public class BookingsController : ControllerBase
 {
-    private readonly IBookingService _bookingService;
+    private readonly IBookingService _service;
+    private readonly ILogger<BookingsController> _logger;
 
-    public BookingsController(IBookingService bookingService)
+    public BookingsController(
+        IBookingService service,
+        ILogger<BookingsController> logger)
     {
-        _bookingService = bookingService;
+        _service = service;
+        _logger = logger;
     }
 
     // =====================================================
     // BOOK A RIDE (USER AS PASSENGER)
-    // POST: api/bookings
+    // =====================================================
+    // POST: api/v1/bookings
     // =====================================================
     [HttpPost]
-    public IActionResult BookRide([FromBody] CreateBookingDto dto)
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public IActionResult Book(
+        [FromBody] CreateBookingDto dto,
+        CancellationToken cancellationToken)
     {
         var userId = User.GetUserId();
-        _bookingService.BookRide(userId, dto);
+
+        _logger.LogInformation(
+            "Booking request received by UserId={UserId} for RideId={RideId}",
+            userId,
+            dto.RideId
+        );
+
+        _service.BookRide(userId, dto);
+
+        _logger.LogInformation(
+            "Booking successful by UserId={UserId} for RideId={RideId}",
+            userId,
+            dto.RideId
+        );
 
         return Ok(new { message = "Ride booked successfully" });
     }
 
     // =====================================================
-    // GET MY BOOKINGS (PASSENGER VIEW)
-    // GET: api/bookings/my
+    // GET MY BOOKINGS
+    // =====================================================
+    // GET: api/v1/bookings/my
     // =====================================================
     [HttpGet("my")]
-    public IActionResult GetMyBookings()
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public IActionResult MyBookings(
+        [FromQuery] PagedRequest request,
+        CancellationToken cancellationToken)
     {
         var userId = User.GetUserId();
-        var bookings = _bookingService.GetMyBookings(userId);
 
-        return Ok(bookings);
+        if (request.PageSize <= 0)
+            return BadRequest("PageSize must be greater than zero");
+
+        _logger.LogInformation(
+            "My bookings requested by UserId={UserId}",
+            userId
+        );
+
+        var result = _service.GetMyBookings(userId, request);
+
+        return Ok(result);
     }
 
     // =====================================================
-    // CANCEL BOOKING (PASSENGER)
-    // DELETE: api/bookings/{id}
+    // CANCEL BOOKING
+    // =====================================================
+    // DELETE: api/v1/bookings/{id}
     // =====================================================
     [HttpDelete("{id:guid}")]
-    public IActionResult CancelBooking(Guid id)
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public IActionResult Cancel(
+        Guid id,
+        CancellationToken cancellationToken)
     {
         var userId = User.GetUserId();
-        _bookingService.CancelBooking(id, userId);
+
+        _logger.LogInformation(
+            "Cancel booking request by UserId={UserId} BookingId={BookingId}",
+            userId,
+            id
+        );
+
+        _service.CancelBooking(id, userId);
+
+        _logger.LogInformation(
+            "Booking cancelled by UserId={UserId} BookingId={BookingId}",
+            userId,
+            id
+        );
 
         return Ok(new { message = "Booking cancelled successfully" });
     }

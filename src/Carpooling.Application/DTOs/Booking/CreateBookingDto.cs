@@ -1,6 +1,6 @@
 ﻿namespace Carpooling.Application.DTOs.Booking;
 
-public record CreateBookingDto
+public class CreateBookingDto
 {
-    public Guid RideId { get; init; }
+    public Guid RideId { get; set; }
 }

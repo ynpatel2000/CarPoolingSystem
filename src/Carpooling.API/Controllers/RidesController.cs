@@ -1,4 +1,6 @@
 ﻿using Carpooling.API.Extensions;
+using Carpooling.Application.Common.Pagination;
+using Carpooling.Application.Common.Querying;
 using Carpooling.Application.DTOs.Ride;
 using Carpooling.Application.Interfaces;
 using Microsoft.AspNetCore.Authorization;
@@ -6,89 +8,106 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace Carpooling.API.Controllers;
 
+[ApiVersion("1.0")]
 [Authorize(Roles = "User")]
 [ApiController]
-[Route("api/rides")]
+[Route("api/v{version:apiVersion}/rides")]
 public class RidesController : ControllerBase
 {
-    private readonly IRideService _rideService;
+    private readonly IRideService _service;
+    private readonly ILogger<RidesController> _logger;
 
-    public RidesController(IRideService rideService)
+    public RidesController(
+        IRideService service,
+        ILogger<RidesController> logger)
     {
-        _rideService = rideService;
-    }
-
-    // =====================================================
-    // GET RIDE BY ID (DETAIL VIEW)
-    // GET: api/rides/{id}
-    // =====================================================
-    [HttpGet("{id:guid}")]
-    public IActionResult GetById(Guid id)
-    {
-        var ride = _rideService.GetById(id);
-        return Ok(ride);
-    }
-
-    // =====================================================
-    // SEARCH RIDES (PASSENGER)
-    // GET: api/rides/search
-    // =====================================================
-    [HttpGet("search")]
-    public IActionResult Search([FromQuery] RideSearchDto dto)
-    {
-        var rides = _rideService.Search(dto);
-        return Ok(rides);
-    }
-
-    // =====================================================
-    // GET MY RIDES (USER AS DRIVER)
-    // GET: api/rides/my
-    // =====================================================
-    [HttpGet("my")]
-    public IActionResult GetMyRides()
-    {
-        var userId = User.GetUserId();
-        var rides = _rideService.GetMyRides(userId);
-        return Ok(rides);
+        _service = service;
+        _logger = logger;
     }
 
     // =====================================================
     // CREATE RIDE (USER AS DRIVER)
-    // POST: api/rides
+    // =====================================================
+    // POST: api/v1/rides
     // =====================================================
     [HttpPost]
-    public IActionResult Create([FromBody] CreateRideDto dto)
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public IActionResult Create(
+        [FromBody] CreateRideDto dto,
+        CancellationToken cancellationToken)
     {
         var userId = User.GetUserId();
-        _rideService.CreateRide(userId, dto);
+
+        _logger.LogInformation(
+            "Create ride request by UserId={UserId}",
+            userId
+        );
+
+        _service.CreateRide(userId, dto);
+
+        _logger.LogInformation(
+            "Ride created successfully by UserId={UserId}",
+            userId
+        );
+
         return Ok(new { message = "Ride created successfully" });
     }
 
     // =====================================================
-    // UPDATE RIDE (ONLY DRIVER)
-    // PUT: api/rides/{id}
+    // GET MY RIDES (USER AS DRIVER)
     // =====================================================
-    [HttpPut("{id:guid}")]
-    public IActionResult Update(Guid id, [FromBody] UpdateRideDto dto)
+    // GET: api/v1/rides/my
+    // =====================================================
+    [HttpGet("my")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public IActionResult MyRides(
+        [FromQuery] PagedRequest page,
+        [FromQuery] SortRequest sort,
+        CancellationToken cancellationToken)
     {
         var userId = User.GetUserId();
-        _rideService.UpdateRide(id, userId, dto);
-        return Ok(new { message = "Ride updated successfully" });
+
+        if (page.PageSize <= 0)
+            return BadRequest("PageSize must be greater than zero");
+
+        _logger.LogInformation(
+            "My rides requested by UserId={UserId}",
+            userId
+        );
+
+        var result = _service.GetMyRides(userId, page, sort);
+
+        return Ok(result);
     }
 
     // =====================================================
-    // DELETE RIDE
-    // DRIVER: delete own ride
-    // ADMIN: delete any ride
-    // DELETE: api/rides/{id}
+    // SEARCH RIDES (PASSENGER)
     // =====================================================
-    [HttpDelete("{id:guid}")]
-    public IActionResult Delete(Guid id)
+    // GET: api/v1/rides/search
+    // =====================================================
+    [HttpGet("search")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public IActionResult Search(
+        [FromQuery] RideSearchDto dto,
+        [FromQuery] PagedRequest page,
+        [FromQuery] SortRequest sort,
+        CancellationToken cancellationToken)
     {
-        var userId = User.GetUserId();
-        var isAdmin = User.IsInRole("Admin");
+        if (page.PageSize <= 0)
+            return BadRequest("PageSize must be greater than zero");
 
-        _rideService.DeleteRide(id, userId, isAdmin);
-        return Ok(new { message = "Ride deleted successfully" });
+        if (dto.RequiredSeats <= 0)
+            return BadRequest("RequiredSeats must be greater than zero");
+
+        _logger.LogInformation(
+            "Ride search requested From={From} To={To} Date={Date}",
+            dto.FromCity,
+            dto.ToCity,
+            dto.RideDate
+        );
+
+        var result = _service.Search(dto, page, sort);
+
+        return Ok(result);
     }
 }

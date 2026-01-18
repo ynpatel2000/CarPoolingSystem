@@ -4,6 +4,7 @@ namespace Carpooling.Application.Interfaces;
 
 public interface IAuthService
 {
-    string Register(RegisterDto dto);
-    string Login(LoginDto dto);
+    AuthResponseDto Register(RegisterDto dto);
+    AuthResponseDto Login(LoginDto dto);
+    AuthResponseDto RefreshToken(string refreshToken);
 }

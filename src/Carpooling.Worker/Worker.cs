@@ -1,131 +1,48 @@
-﻿using Carpooling.Worker.Services;
+﻿using Carpooling.Worker.Models;
+using Carpooling.Worker.Services;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
 using Serilog;
 using System.Text;
+using System.Text.Json;
 
 namespace Carpooling.Worker;
 
 public class Worker : BackgroundService
 {
-    private readonly EmailService _emailService;
-    private const string BookingQueue = "booking_queue";
-    private const string BookingDlq = "booking_dlq";
+    private readonly EmailNotificationService _emailService;
+
+    private IConnection? _connection;
+    private IModel? _channel;
+
+    public const string BookingQueue = "booking_queue";
+    public const string BookingDlq = "booking_dlq";
     private const int MaxRetryCount = 3;
 
-    public Worker(EmailService emailService)
+    public Worker(EmailNotificationService emailService)
     {
         _emailService = emailService;
     }
 
     protected override Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        Log.Information("🚀 Carpooling Worker started and listening for messages");
+        Log.Information("🚀 Carpooling Worker started");
 
         var factory = new ConnectionFactory
         {
-            HostName = "rabbitmq",   // localhost if NOT dockerized
-            DispatchConsumersAsync = false
+            HostName = "rabbitmq", // localhost if non-docker
+            DispatchConsumersAsync = true
         };
 
-        var connection = factory.CreateConnection();
-        var channel = connection.CreateModel();
+        _connection = factory.CreateConnection();
+        _channel = _connection.CreateModel();
 
-        // -----------------------------
-        // MAIN QUEUE WITH DLQ CONFIG
-        // -----------------------------
-        var mainQueueArgs = new Dictionary<string, object>
-        {
-            { "x-dead-letter-exchange", "" },
-            { "x-dead-letter-routing-key", BookingDlq }
-        };
+        DeclareQueues(_channel);
 
-        channel.QueueDeclare(
-            queue: BookingQueue,
-            durable: true,
-            exclusive: false,
-            autoDelete: false,
-            arguments: mainQueueArgs
-        );
+        var consumer = new AsyncEventingBasicConsumer(_channel);
+        consumer.Received += HandleMessageAsync;
 
-        // -----------------------------
-        // DEAD LETTER QUEUE
-        // -----------------------------
-        channel.QueueDeclare(
-            queue: BookingDlq,
-            durable: true,
-            exclusive: false,
-            autoDelete: false,
-            arguments: null
-        );
-
-        // -----------------------------
-        // CONSUMER
-        // -----------------------------
-        var consumer = new EventingBasicConsumer(channel);
-
-        consumer.Received += async (_, args) =>
-        {
-            var message = Encoding.UTF8.GetString(args.Body.ToArray());
-            var retryCount = GetRetryCount(args);
-
-            try
-            {
-                Log.Information(
-                    "📩 Booking event received | Retry={RetryCount} | Message={Message}",
-                    retryCount,
-                    message
-                );
-
-                // 🔔 REAL EMAIL / NOTIFICATION
-                await _emailService.SendAsync(
-                    to: "user@example.com",
-                    subject: "Carpooling Booking Confirmed",
-                    body: message
-                );
-
-                // ✅ ACK ON SUCCESS
-                channel.BasicAck(args.DeliveryTag, multiple: false);
-
-                Log.Information("✅ Message processed successfully");
-            }
-            catch (Exception ex)
-            {
-                Log.Error(
-                    ex,
-                    "❌ Error processing message | Retry={RetryCount}",
-                    retryCount
-                );
-
-                if (retryCount >= MaxRetryCount)
-                {
-                    Log.Warning("☠ Retry limit exceeded. Sending message to DLQ");
-
-                    // ❌ Reject → DLQ
-                    channel.BasicNack(
-                        deliveryTag: args.DeliveryTag,
-                        multiple: false,
-                        requeue: false
-                    );
-                }
-                else
-                {
-                    Log.Warning("🔁 Retrying message");
-
-                    // 🔁 Requeue for retry
-                    channel.BasicNack(
-                        deliveryTag: args.DeliveryTag,
-                        multiple: false,
-                        requeue: true
-                    );
-                }
-            }
-        };
-
-        // -----------------------------
-        // START CONSUMING (MANUAL ACK)
-        // -----------------------------
-        channel.BasicConsume(
+        _channel.BasicConsume(
             queue: BookingQueue,
             autoAck: false,
             consumer: consumer
@@ -134,16 +51,79 @@ public class Worker : BackgroundService
         return Task.CompletedTask;
     }
 
-    // ---------------------------------------------
-    // RETRY COUNT FROM RABBITMQ x-death HEADER
-    // ---------------------------------------------
+    private async Task HandleMessageAsync(object sender, BasicDeliverEventArgs args)
+    {
+        var message = Encoding.UTF8.GetString(args.Body.ToArray());
+        var retryCount = GetRetryCount(args);
+
+        try
+        {
+            Log.Information(
+                "📩 Booking event received | Retry={RetryCount} | Message={Message}",
+                retryCount,
+                message
+            );
+
+            var payload = JsonSerializer.Deserialize<BookingEvent>(message)
+                          ?? throw new Exception("Invalid message payload");
+
+            await _emailService.SendAsync(
+                to: payload.Email,
+                subject: "Carpooling Booking Confirmed",
+                body: payload.Message
+            );
+
+            _channel!.BasicAck(args.DeliveryTag, false);
+            Log.Information("✅ Message processed successfully");
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "❌ Error processing message | Retry={RetryCount}", retryCount);
+
+            _channel!.BasicNack(
+                deliveryTag: args.DeliveryTag,
+                multiple: false,
+                requeue: retryCount < MaxRetryCount
+            );
+        }
+    }
+
+    private static void DeclareQueues(IModel channel)
+    {
+        channel.QueueDeclare(
+            queue: BookingQueue,
+            durable: true,
+            exclusive: false,
+            autoDelete: false,
+            arguments: new Dictionary<string, object>
+            {
+                { "x-dead-letter-exchange", "" },
+                { "x-dead-letter-routing-key", BookingDlq }
+            }
+        );
+
+        channel.QueueDeclare(
+            queue: BookingDlq,
+            durable: true,
+            exclusive: false,
+            autoDelete: false
+        );
+    }
+
+    public override void Dispose()
+    {
+        _channel?.Close();
+        _connection?.Close();
+        base.Dispose();
+    }
+
     private static int GetRetryCount(BasicDeliverEventArgs args)
     {
         if (args.BasicProperties.Headers == null ||
-            !args.BasicProperties.Headers.ContainsKey("x-death"))
+            !args.BasicProperties.Headers.TryGetValue("x-death", out var value))
             return 0;
 
-        var deaths = args.BasicProperties.Headers["x-death"] as List<object>;
+        var deaths = value as List<object>;
         if (deaths == null || deaths.Count == 0)
             return 0;
 
