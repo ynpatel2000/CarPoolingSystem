@@ -1,5 +1,5 @@
-﻿using Carpooling.Worker.Models;
-using Carpooling.Worker.Services;
+﻿using Carpooling.Application.Interfaces;
+using Carpooling.Worker.Models;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
 using Serilog;
@@ -10,7 +10,7 @@ namespace Carpooling.Worker;
 
 public class Worker : BackgroundService
 {
-    private readonly EmailNotificationService _emailService;
+    private readonly INotificationService _notificationService;
 
     private IConnection? _connection;
     private IModel? _channel;
@@ -19,9 +19,9 @@ public class Worker : BackgroundService
     public const string BookingDlq = "booking_dlq";
     private const int MaxRetryCount = 3;
 
-    public Worker(EmailNotificationService emailService)
+    public Worker(INotificationService notificationService)
     {
-        _emailService = emailService;
+        _notificationService = notificationService;
     }
 
     protected override Task ExecuteAsync(CancellationToken stoppingToken)
@@ -65,20 +65,29 @@ public class Worker : BackgroundService
             );
 
             var payload = JsonSerializer.Deserialize<BookingEvent>(message)
-                          ?? throw new Exception("Invalid message payload");
+                          ?? throw new InvalidOperationException("Invalid booking event payload");
 
-            await _emailService.SendAsync(
-                to: payload.Email,
+            await _notificationService.SendBookingConfirmationAsync(
+                toEmail: payload.Email,
                 subject: "Carpooling Booking Confirmed",
-                body: payload.Message
+                message: payload.Message,
+                cancellationToken: CancellationToken.None
             );
 
             _channel!.BasicAck(args.DeliveryTag, false);
-            Log.Information("✅ Message processed successfully");
+
+            Log.Information(
+                "✅ Booking email sent successfully to {Email}",
+                payload.Email
+            );
         }
         catch (Exception ex)
         {
-            Log.Error(ex, "❌ Error processing message | Retry={RetryCount}", retryCount);
+            Log.Error(
+                ex,
+                "❌ Error processing booking message | Retry={RetryCount}",
+                retryCount
+            );
 
             _channel!.BasicNack(
                 deliveryTag: args.DeliveryTag,

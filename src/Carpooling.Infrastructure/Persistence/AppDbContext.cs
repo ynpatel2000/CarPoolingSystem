@@ -15,12 +15,14 @@ public class AppDbContext : DbContext, IAppDbContext
     public DbSet<Booking> Bookings => Set<Booking>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
+    public DbSet<OutboxEvent> OutboxEvents => Set<OutboxEvent>();
 
     IQueryable<User> IAppDbContext.Users => Users;
     IQueryable<Ride> IAppDbContext.Rides => Rides;
     IQueryable<Booking> IAppDbContext.Bookings => Bookings;
     IQueryable<AuditLog> IAppDbContext.AuditLogs => AuditLogs;
     IQueryable<RefreshToken> IAppDbContext.RefreshTokens => RefreshTokens;
+    IQueryable<OutboxEvent> IAppDbContext.OutboxEvents => OutboxEvents;
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

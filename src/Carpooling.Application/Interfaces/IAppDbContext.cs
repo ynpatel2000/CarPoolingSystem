@@ -10,6 +10,7 @@ public interface IAppDbContext
     IQueryable<Booking> Bookings { get; }
     IQueryable<AuditLog> AuditLogs { get; }
     IQueryable<RefreshToken> RefreshTokens { get; }
+    IQueryable<OutboxEvent> OutboxEvents { get; }
 
     void Add<T>(T entity) where T : class;
     void Update<T>(T entity) where T : class;

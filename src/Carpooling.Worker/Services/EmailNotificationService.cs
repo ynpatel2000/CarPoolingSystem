@@ -9,16 +9,21 @@ namespace Carpooling.Worker.Services;
 public sealed class EmailNotificationService : INotificationService
 {
     private readonly EmailSettings _settings;
+    private readonly ILogger<EmailNotificationService> _logger;
 
-    public EmailNotificationService(IOptions<EmailSettings> options)
+    public EmailNotificationService(
+        IOptions<EmailSettings> options,
+        ILogger<EmailNotificationService> logger)
     {
         _settings = options.Value;
+        _logger = logger;
     }
 
     public async Task SendBookingConfirmationAsync(
         string toEmail,
         string subject,
-        string message)
+        string message,
+        CancellationToken cancellationToken = default)
     {
         var email = new MimeMessage();
 
@@ -41,25 +46,50 @@ public sealed class EmailNotificationService : INotificationService
 
         try
         {
-            var secureOption = _settings.UseSsl
-                ? SecureSocketOptions.StartTls
-                : SecureSocketOptions.Auto;
+            _logger.LogInformation(
+                "Sending booking email to {Email}",
+                toEmail
+            );
+
+            var secureSocketOption = _settings.UseSsl
+                ? SecureSocketOptions.SslOnConnect
+                : SecureSocketOptions.StartTlsWhenAvailable;
 
             await smtp.ConnectAsync(
                 _settings.Host,
                 _settings.Port,
-                secureOption);
+                secureSocketOption,
+                cancellationToken);
 
-            await smtp.AuthenticateAsync(
-                _settings.Username,
-                _settings.Password);
+            if (!string.IsNullOrWhiteSpace(_settings.Username))
+            {
+                await smtp.AuthenticateAsync(
+                    _settings.Username,
+                    _settings.Password,
+                    cancellationToken);
+            }
 
-            await smtp.SendAsync(email);
+            await smtp.SendAsync(email, cancellationToken);
+
+            _logger.LogInformation(
+                "Booking email sent successfully to {Email}",
+                toEmail
+            );
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(
+                ex,
+                "Failed to send booking email to {Email}",
+                toEmail
+            );
+
+            throw; // IMPORTANT: let worker retry / DLQ
         }
         finally
         {
             if (smtp.IsConnected)
-                await smtp.DisconnectAsync(true);
+                await smtp.DisconnectAsync(true, cancellationToken);
         }
     }
 }

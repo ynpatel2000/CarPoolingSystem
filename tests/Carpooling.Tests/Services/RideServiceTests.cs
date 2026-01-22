@@ -4,8 +4,11 @@ using Carpooling.Application.Interfaces;
 using Carpooling.Application.Services;
 using Carpooling.Domain.Entities;
 using FluentAssertions;
+using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
+
+namespace Carpooling.Tests.Services;
 
 public class RideServiceTests
 {
@@ -15,13 +18,18 @@ public class RideServiceTests
         // Arrange
         var rides = new List<Ride>();
 
-        var dbMock = new Mock<IAppDbContext>();
-        dbMock.Setup(x => x.Rides).Returns(rides.AsQueryable());
-        dbMock.Setup(x => x.Add(It.IsAny<Ride>()))
-              .Callback<Ride>(r => rides.Add(r));
-        dbMock.Setup(x => x.SaveChanges()).Returns(1);
+        var db = new Mock<IAppDbContext>();
+        var logger = new Mock<ILogger<RideService>>();
 
-        var service = new RideService(dbMock.Object);
+        db.Setup(x => x.Rides).Returns(rides.AsQueryable());
+        db.Setup(x => x.Add(It.IsAny<Ride>()))
+          .Callback<Ride>(r => rides.Add(r));
+        db.Setup(x => x.SaveChanges()).Returns(1);
+
+        var service = new RideService(
+            db.Object,
+            logger.Object
+        );
 
         var dto = new CreateRideDto
         {
@@ -36,22 +44,31 @@ public class RideServiceTests
         service.CreateRide(Guid.NewGuid(), dto);
 
         // Assert
-        rides.Count.Should().Be(1);
+        rides.Should().HaveCount(1);
+        db.Verify(x => x.SaveChanges(), Times.Once);
     }
 
     [Fact]
     public void CreateRide_Should_Throw_When_Seats_Invalid()
     {
-        var dbMock = new Mock<IAppDbContext>();
-        var service = new RideService(dbMock.Object);
+        // Arrange
+        var db = new Mock<IAppDbContext>();
+        var logger = new Mock<ILogger<RideService>>();
+
+        var service = new RideService(
+            db.Object,
+            logger.Object
+        );
 
         var dto = new CreateRideDto
         {
             AvailableSeats = 0
         };
 
+        // Act
         Action act = () => service.CreateRide(Guid.NewGuid(), dto);
 
+        // Assert
         act.Should().Throw<AppException>();
     }
 }

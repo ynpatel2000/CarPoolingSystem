@@ -1,26 +1,39 @@
 ﻿using System.Diagnostics;
 
-public class PerformanceMiddleware
+namespace Carpooling.API.Middleware;
+
+public sealed class PerformanceMiddleware
 {
     private readonly RequestDelegate _next;
-    private readonly ILogger _logger;
+    private readonly ILogger<PerformanceMiddleware> _logger;
 
-    public PerformanceMiddleware(RequestDelegate next, ILogger logger)
+    public PerformanceMiddleware(
+        RequestDelegate next,
+        ILogger<PerformanceMiddleware> logger)
     {
         _next = next;
         _logger = logger;
     }
 
-    public async Task Invoke(HttpContext context)
+    public async Task InvokeAsync(HttpContext context)
     {
-        var sw = Stopwatch.StartNew();
-        await _next(context);
-        sw.Stop();
+        var stopwatch = Stopwatch.StartNew();
 
-        if (sw.ElapsedMilliseconds > 500)
+        await _next(context);
+
+        stopwatch.Stop();
+
+        var elapsedMs = stopwatch.ElapsedMilliseconds;
+
+        // Log only slow requests (production-safe)
+        if (elapsedMs > 1000)
         {
-            _logger.LogWarning("Slow API {Path} - {Time}ms",
-                context.Request.Path, sw.ElapsedMilliseconds);
+            _logger.LogWarning(
+                "Slow request detected: {Method} {Path} took {ElapsedMilliseconds}ms",
+                context.Request.Method,
+                context.Request.Path,
+                elapsedMs
+            );
         }
     }
 }

@@ -1,4 +1,4 @@
-using Carpooling.Application.Interfaces;
+﻿using Carpooling.Application.Interfaces;
 using Carpooling.Worker;
 using Carpooling.Worker.HealthChecks;
 using Carpooling.Worker.Services;
@@ -6,47 +6,58 @@ using Serilog;
 
 Log.Logger = new LoggerConfiguration()
     .WriteTo.Console()
-    .WriteTo.File("logs/worker-.log", rollingInterval: RollingInterval.Day)
+    .WriteTo.File(
+        path: "logs/worker-.log",
+        rollingInterval: RollingInterval.Day,
+        retainedFileCountLimit: 7)
     .CreateLogger();
 
 try
 {
-    Log.Information("Starting Carpooling Worker");
+    Log.Information("🚀 Starting Carpooling Worker");
 
     Host.CreateDefaultBuilder(args)
         .UseSerilog()
         .ConfigureServices((context, services) =>
         {
-            // -----------------------------
-            // CONFIGURATION
-            // -----------------------------
-            services.Configure<EmailSettings>(context.Configuration.GetSection(EmailSettings.SectionName));
+            // =====================================================
+            // CONFIGURATION – EMAIL SETTINGS
+            // =====================================================
+            services.Configure<EmailSettings>(
+                context.Configuration.GetSection(EmailSettings.SectionName));
+
             services.PostConfigure<EmailSettings>(settings =>
             {
                 if (string.IsNullOrWhiteSpace(settings.Host))
-                    throw new InvalidOperationException("Email Host is missing");
+                    throw new InvalidOperationException("EmailSettings.Host is missing");
 
                 if (string.IsNullOrWhiteSpace(settings.FromEmail))
-                    throw new InvalidOperationException("Email FromEmail is missing");
+                    throw new InvalidOperationException("EmailSettings.FromEmail is missing");
 
-                if (string.IsNullOrWhiteSpace(settings.Username))
-                    throw new InvalidOperationException("Email Username is missing");
+                if (string.IsNullOrWhiteSpace(settings.FromName))
+                    throw new InvalidOperationException("EmailSettings.FromName is missing");
+
+                if (settings.Port <= 0)
+                    throw new InvalidOperationException("EmailSettings.Port is invalid");
+
+                if (settings.TimeoutSeconds <= 0)
+                    throw new InvalidOperationException("EmailSettings.TimeoutSeconds is invalid");
             });
 
-
-            // -----------------------------
+            // =====================================================
             // APPLICATION ABSTRACTIONS
-            // -----------------------------
-            services.AddSingleton<INotificationService, EmailNotificationService>();
+            // =====================================================
+            services.AddScoped<INotificationService, EmailNotificationService>();
 
-            // -----------------------------
-            // BACKGROUND WORKER
-            // -----------------------------
+            // =====================================================
+            // BACKGROUND WORKERS
+            // =====================================================
+            // RabbitMQ consumer / email sender
             services.AddHostedService<Worker>();
 
-            // -----------------------------
+            // =====================================================
             // HEALTH CHECKS
-            // -----------------------------
+            // =====================================================
             services.AddHealthChecks()
                 .AddCheck<WorkerHealthCheck>("worker_health");
         })
@@ -55,7 +66,7 @@ try
 }
 catch (Exception ex)
 {
-    Log.Fatal(ex, "Worker terminated unexpectedly");
+    Log.Fatal(ex, "❌ Carpooling Worker terminated unexpectedly");
 }
 finally
 {
